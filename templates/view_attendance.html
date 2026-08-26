@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Attendance</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+
+    <style>
+    .cardt {
+      background: rgba(255, 255, 255, 0.1);
+      background: linear-gradient(45deg, #053f5e, #062c72, #044f45);
+      backdrop-filter: blur(30px);
+      padding: 20px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      transition: 0.4s;
+      border: none;
+      margin-top: 100px;
+      margin-left: 20%;
+      margin-right: 20%;
+      text-align: center;
+      flex-direction: column;
+      display: flex;
+    }
+
+    .cardt h2 {
+      margin-bottom: 15px;
+      font-size: 28px;
+    }
+    form{
+      text-align: center;
+    }
+    form button{
+      border-radius: 8px;
+    }
+    .cardt input{
+      padding: 8px;
+      border-radius: 8px;
+    }
+    .btn{
+      margin-top: 5px;
+      margin-bottom: 5px;
+      font-size: medium;
+    }
+    .cardt a{
+      text-align: center;
+      display: inline-block;
+      white-space: nowrap;
+      color: #00bfff;
+      font-size: large;
+      text-decoration: none;
+    }
+    table{
+      width: 100%;
+      background-color: white;
+      color: black;
+      margin-top: 20px;
+      border-collapse: collapse;
+    }
+   th{
+      padding: 12px 16px;
+      border: 1px solid whitesmoke ;
+      background-color: #02b5c9;
+      text-align: center;
+      color: white;
+    }
+    td{
+      padding: 12px 16px;
+      border: 1px solid whitesmoke ;
+      text-align: center;
+    }
+
+    .cardt:hover {
+      transform: translatey(-10px) scale(1.03);
+      box-shadow: 0 0 25px #11a0ff;
+    }
+
+    .cardt::before {
+      content: "";
+      position: absolute;
+      border-radius: 22px;
+      inset: 0;
+      padding: 2.5px;
+      background: linear-gradient(90deg, #38bdf8, #22c55e, #a855f7, #220bf5, #38bdf8);
+      -webkit-mask: linear-gradient(#fff) content-box, linear-gradient(#fff);
+      background-size: 300% 300%;
+      mask-composite: exclude;
+      opacity: 109;
+      animation: moveglow 1s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes moveglow {
+      0% {
+        background-position: 0% 50%;
+      }
+
+      50% {
+        background-position: 50% 100%;
+      }
+
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+  </style>
+
+</head>
+
+<body>
+    <header>
+        <h1 class="glow">🎓 Face Recognition Attendance System</h1>
+        <h4 class="subglow">Smart • Secure • Automated Attendance</h4>
+    </header>
+
+    <div class="cardt">
+        <h2>View Attendance</h2>
+
+        <form id="attendanceForm">
+            <input type="date" id="dateInput" name="date">
+            <button type="button" onclick="filterByDate()">Show Attendance</button>
+        </form>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Student Name</th>
+                    <th>Register No</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Parent Mobile No</th>
+                </tr>
+            </thead>
+            <tbody id="attendanceTable">
+                {% for record in attendance %}
+                <tr class="attendance-row" data-date="{{ record.date }}">
+                    <td>{{ record.name }}</td>
+                    <td>{{ record.reg_no }}</td>
+                    <td>{{ record.date }}</td>
+                    <td>{{ record.time }}</td>
+                    <td>Present</td>
+                    <td>-</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div style="margin-top: 20px; margin-bottom: 20px;">
+            <a href="/download_excel_attendance" style="display: inline-block;">
+                <button class="btn" type="button">⬇️ Download Excel Sheet</button>
+            </a>
+        </div>
+
+        <a href="/">← Back to Home</a>
+    </div>
+
+
+</body>
+<footer class="footer">
+  <div class="footer-content">
+    <div class="footer-left">
+      <h3>🎓 Face Attendance System</h3>
+      <p>AI-based Face Recognition Attendance Platform</p>
+    </div>
+
+    <div class="footer-center">
+      <p>© 2026 Designed & Developed by Balaji P</p>
+    </div>
+
+    <div class="footer-right">
+      <p class="tech">AI</p>
+      <p class="tech">OpenCV</p>
+      <p class="tech">Flask</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function filterByDate() {
+    const selectedDate = document.getElementById('dateInput').value;
+    const rows = document.querySelectorAll('.attendance-row');
+    
+    rows.forEach(row => {
+      const rowDate = row.getAttribute('data-date');
+      
+      if (selectedDate === '') {
+        row.style.display = 'table-row';
+      } else if (rowDate === selectedDate) {
+        row.style.display = 'table-row';
+      } else {
+        row.style.display = 'none';
+      }
+    });
+  }
+</script>
+
+</html>
