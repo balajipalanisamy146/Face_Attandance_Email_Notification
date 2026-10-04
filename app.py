@@ -245,13 +245,13 @@ def send_email(
 ):
 
     if not to_email:
-        print("⚠️ Parent email not available.")
+        print(" Parent email not available.")
         return False
 
     if not EMAIL_PASSWORD:
 
         print(
-            "⚠️ EMAIL_PASSWORD is not configured."
+            " EMAIL_PASSWORD is not configured."
         )
 
         return False
@@ -377,7 +377,7 @@ def load_students():
     if conn is None:
 
         print(
-            "⚠️ DATABASE_URL is not configured."
+            " DATABASE_URL is not configured."
         )
 
         return students
@@ -1052,7 +1052,7 @@ def notify_today():
         ):
 
             message = (
-                "❌ No attendance file found."
+                " No attendance file found."
             )
 
             return render_template(

@@ -1,0 +1,4 @@
+'        print("⚠️ Parent email not available.")\n'
+'            "⚠️ EMAIL_PASSWORD is not configured."\n'
+'            "⚠️ DATABASE_URL is not configured."\n'
+'                "❌ No attendance file found."\n'
