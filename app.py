@@ -23,15 +23,49 @@ from openpyxl import Workbook, load_workbook
 from email.mime.text import MIMEText
 from werkzeug.utils import secure_filename
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # ============================================================
-# CONFIGURATION
+# STORAGE CONFIGURATION
 # ============================================================
 
-DATASET_DIR = "dataset"
+IS_RENDER = os.getenv("RENDER") == "true"
+
+if IS_RENDER:
+    # Render Persistent Disk
+    STORAGE_DIR = "/opt/render/project/src/storage"
+
+    DATASET_DIR = os.path.join(
+        STORAGE_DIR,
+        "dataset"
+    )
+
+    TRAINER_FILE = os.path.join(
+        STORAGE_DIR,
+        "trainer.yml"
+    )
+
+else:
+    # Local storage - unchanged
+    STORAGE_DIR = "."
+
+    DATASET_DIR = "dataset"
+
+    TRAINER_FILE = "trainer.yml"
+
+
+# Local-only files
 STUDENTS_FILE = "students.csv"
-TRAINER_FILE = "trainer.yml"
 ATTENDANCE_FILE = "attendance.xlsx"
+
+# Make sure dataset folder exists
+os.makedirs(
+    DATASET_DIR,
+    exist_ok=True
+)
 
 # ------------------------------------------------------------
 # Environment variables
@@ -43,8 +77,6 @@ EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-# Render automatically provides RENDER=true
-IS_RENDER = os.getenv("RENDER") == "true"
 
 
 # ============================================================
@@ -52,6 +84,7 @@ IS_RENDER = os.getenv("RENDER") == "true"
 # ============================================================
 
 app = Flask(__name__)
+
 
 recognizer_lock = threading.Lock()
 
@@ -154,6 +187,7 @@ def initialize_database():
 
         if conn:
             conn.close()
+
 
 
 # ============================================================
