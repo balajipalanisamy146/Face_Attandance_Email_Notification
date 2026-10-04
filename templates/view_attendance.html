@@ -18,7 +18,7 @@
       border: 1px solid rgba(255, 255, 255, 0.25);
       transition: 0.4s;
       border: none;
-      margin-top: 100px;
+      margin-top: 50px;
       margin-left: 20%;
       margin-right: 20%;
       text-align: center;
@@ -120,7 +120,7 @@
         <h2>View Attendance</h2>
 
         <form id="attendanceForm">
-            <input type="date" id="dateInput" name="date">
+            <input type="date" id="dateInput" name="date" value="{{ today }}">
             <button type="button" onclick="filterByDate()">Show Attendance</button>
         </form>
 
@@ -183,10 +183,10 @@
   function filterByDate() {
     const selectedDate = document.getElementById('dateInput').value;
     const rows = document.querySelectorAll('.attendance-row');
-    
+
     rows.forEach(row => {
       const rowDate = row.getAttribute('data-date');
-      
+
       if (selectedDate === '') {
         row.style.display = 'table-row';
       } else if (rowDate === selectedDate) {
@@ -196,6 +196,8 @@
       }
     });
   }
+
+  document.addEventListener('DOMContentLoaded', filterByDate);
 </script>
 
 </html>

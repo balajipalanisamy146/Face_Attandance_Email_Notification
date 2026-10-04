@@ -1,13 +1,15 @@
 import cv2
 import os
 import numpy as np
-from flask import Flask, render_template, request, redirect, url_for, send_file
+import threading
+from flask import Flask, jsonify, render_template, request, redirect, url_for, send_file
 import csv
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 import smtplib
 from email.mime.text import MIMEText
 import time
+from werkzeug.utils import secure_filename
 
 # ================= CONFIG =================
 DATASET_DIR = "dataset"
@@ -19,11 +21,31 @@ EMAIL_SENDER = "balajigtbook@gmail.com"
 EMAIL_PASSWORD = "jkmo yjbh nity dqpi"
 
 app = Flask(__name__)
+recognizer_lock = threading.Lock()
+cached_recognizer = None
+cached_trainer_mtime = None
+capture_last_frame_at = {}
+capture_lock = threading.Lock()
 
 # ============ Haar Cascade ================
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+cascade_filename = "haarcascade_frontalface_default.xml"
+cascade_paths = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", cascade_filename),
+    os.path.join(cv2.data.haarcascades, cascade_filename),
 )
+face_cascade = None
+
+for cascade_path in cascade_paths:
+    if os.path.isfile(cascade_path):
+        candidate = cv2.CascadeClassifier(cascade_path)
+        if not candidate.empty():
+            face_cascade = candidate
+            break
+
+if face_cascade is None:
+    raise RuntimeError(
+        "Unable to load the Haar cascade. Checked: " + ", ".join(cascade_paths)
+    )
 
 # ================= EMAIL ==================
 def send_email(to_email, student_name, date_str, time_str):
@@ -69,10 +91,9 @@ def load_students():
 
 
 def save_student(name, reg_no, parent_email):
-    os.makedirs(os.path.join(DATASET_DIR, name), exist_ok=True)
-
     students = load_students()
     student_id = len(students) + 1
+    os.makedirs(os.path.join(DATASET_DIR, str(student_id)), exist_ok=True)
 
     file_exists = os.path.exists(STUDENTS_FILE)
     write_header = True
@@ -97,61 +118,52 @@ def save_student(name, reg_no, parent_email):
     return student_id
 
 
-# ================= CAPTURE =================
+def decode_browser_frame():
+    uploaded_frame = request.files.get("frame")
+    if uploaded_frame is None:
+        return None
 
-def capture_images(student_name):
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("❌ Camera not accessible. Trying index 1...")
-        cap = cv2.VideoCapture(1)
-        if not cap.isOpened():
-            print("❌ Camera still not accessible.")
-            return False
+    encoded_frame = np.frombuffer(uploaded_frame.read(), dtype=np.uint8)
+    if encoded_frame.size == 0:
+        return None
 
-    count = 0
-    last_capture_time = 0  # ⏱️ track last capture
+    return cv2.imdecode(encoded_frame, cv2.IMREAD_COLOR)
 
-    cv2.namedWindow("Register - Press Q to Stop", cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty("Register - Press Q to Stop", cv2.WND_PROP_TOPMOST, 1)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("❌ Failed to read frame.")
-            break
+def student_dataset_dir(student_id, student_name):
+    student_dir = os.path.join(DATASET_DIR, str(student_id))
+    if os.path.isdir(student_dir) and os.listdir(student_dir):
+        return student_dir
+    if os.path.basename(student_name) != student_name or student_name in (".", ".."):
+        return os.path.join(os.path.abspath(DATASET_DIR), secure_filename(student_name) or str(student_id))
+    legacy_dir = os.path.abspath(os.path.join(DATASET_DIR, student_name))
+    dataset_root = os.path.abspath(DATASET_DIR)
+    if os.path.commonpath((dataset_root, legacy_dir)) == dataset_root:
+        return legacy_dir
+    return os.path.join(dataset_root, secure_filename(student_name) or str(student_id))
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-        current_time = time.time()
+def get_trained_recognizer():
+    global cached_recognizer, cached_trainer_mtime
 
-        for (x, y, w, h) in faces:
-            # ⏱️ Capture only if 1 second passed
-            if current_time - last_capture_time >= 1 and count < 30:
-                count += 1
-                last_capture_time = current_time
-
-                face_img = gray[y:y+h, x:x+w]
-                img_path = os.path.join(DATASET_DIR, student_name, f"{count}.jpg")
-                cv2.imwrite(img_path, face_img)
-
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(frame, f"Capturing {count}/30", (x, y-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-        cv2.imshow("Register - Press Q to Stop", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q") or count >= 30:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-    print(f"✅ Captured {count} images for {student_name}")
-    return count > 0
+    trainer_mtime = os.path.getmtime(TRAINER_FILE)
+    with recognizer_lock:
+        if cached_recognizer is None or cached_trainer_mtime != trainer_mtime:
+            if not hasattr(cv2, "face"):
+                raise RuntimeError(
+                    "OpenCV face recognition is unavailable. Install opencv-contrib-python-headless."
+                )
+            recognizer = cv2.face.LBPHFaceRecognizer_create()
+            recognizer.read(TRAINER_FILE)
+            cached_recognizer = recognizer
+            cached_trainer_mtime = trainer_mtime
+        return cached_recognizer
 
 
 # ================= TRAIN MODEL =================
 def train_lbph():
+    global cached_recognizer, cached_trainer_mtime
+
     recognizer = cv2.face.LBPHFaceRecognizer_create()
 
     faces = []
@@ -160,7 +172,7 @@ def train_lbph():
     students = load_students()
 
     for student_id, info in students.items():
-        person_dir = os.path.join(DATASET_DIR, info["name"])
+        person_dir = student_dataset_dir(student_id, info["name"])
 
         if not os.path.exists(person_dir):
             print("❌ Folder Missing:", person_dir)
@@ -183,6 +195,9 @@ def train_lbph():
 
     recognizer.train(faces, np.array(labels))
     recognizer.save(TRAINER_FILE)
+    with recognizer_lock:
+        cached_recognizer = None
+        cached_trainer_mtime = None
 
     print("✅ Training Completed Successfully!")
     return True
@@ -209,10 +224,24 @@ def mark_attendance(student_id):
         wb = load_workbook(ATTENDANCE_FILE)
         ws = wb.active
 
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            row_date = row[2]
+            if isinstance(row_date, datetime):
+                row_date = row_date.strftime("%Y-%m-%d")
+            try:
+                same_student = int(row[0]) == int(student_id)
+            except (TypeError, ValueError):
+                same_student = False
+            if same_student and str(row_date) == date_str:
+                wb.close()
+                return False
+
     ws.append([student_id, name, date_str, time_str])
     wb.save(ATTENDANCE_FILE)
+    wb.close()
 
     send_email(email, name, date_str, time_str)
+    return True
 
 
 # ================= ROUTES =================
@@ -253,21 +282,65 @@ def notify_today():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name = request.form["name"]
-        reg_no = request.form["reg_no"]
-        parent_email = request.form["parent_email"]
+        student_data = request.get_json() if request.is_json else request.form
+        name = str(student_data.get("name", "")).strip()
+        reg_no = str(student_data.get("reg_no", "")).strip()
+        parent_email = str(student_data.get("parent_email", "")).strip()
+        if not name or not reg_no or not parent_email:
+            return jsonify(error="Name, register number, and parent email are required."), 400
 
-        # ✅ Correct Order
-        save_student(name, reg_no, parent_email)
-
-        if capture_images(name):
-            message = "✅ Registration successful!"
-        else:
-            message = "❌ Registration failed - camera issue."
-
-        return render_template("register.html", message=message)
+        student_id = save_student(name, reg_no, parent_email)
+        return jsonify(student_id=student_id, name=name, target_images=30), 201
 
     return render_template("register.html")
+
+
+@app.route("/capture_frame/<int:student_id>", methods=["POST"])
+def capture_frame(student_id):
+    students = load_students()
+    if student_id not in students:
+        return jsonify(error="Student registration was not found."), 404
+
+    frame = decode_browser_frame()
+    if frame is None:
+        return jsonify(error="A valid camera frame is required."), 400
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+    student_dir = os.path.join(DATASET_DIR, str(student_id))
+    os.makedirs(student_dir, exist_ok=True)
+    captured_files = [
+        filename for filename in os.listdir(student_dir)
+        if filename.lower().endswith((".jpg", ".jpeg", ".png"))
+    ]
+    captured_count = len(captured_files)
+
+    if captured_count >= 30:
+        return jsonify(captured=captured_count, complete=True)
+    if len(faces) == 0:
+        return jsonify(captured=captured_count, complete=False, message="No face detected. Look at the camera.")
+    if len(faces) > 1:
+        return jsonify(captured=captured_count, complete=False, message="Only one person should be in the frame.")
+
+    now = time.monotonic()
+    with capture_lock:
+        last_capture = capture_last_frame_at.get(student_id, 0)
+        if now - last_capture < 0.85:
+            return jsonify(captured=captured_count, complete=False, message="Hold still for a moment.")
+
+        x, y, width, height = faces[0]
+        face_image = cv2.resize(gray[y:y + height, x:x + width], (200, 200))
+        filename = os.path.join(student_dir, f"{captured_count + 1}.jpg")
+        if not cv2.imwrite(filename, face_image):
+            return jsonify(error="Could not save the captured face image."), 500
+        capture_last_frame_at[student_id] = now
+        captured_count += 1
+
+    return jsonify(
+        captured=captured_count,
+        complete=captured_count >= 30,
+        message="Face captured." if captured_count < 30 else "Registration photos captured.",
+    )
 
 
 @app.route("/train", methods=["GET", "POST"])
@@ -288,63 +361,55 @@ def recognize():
 
 @app.route("/start_recognition", methods=["POST"])
 def start_recognition():
-    students = load_students()
-
     if not os.path.exists(TRAINER_FILE):
-        return "❌ No trained model found. Train first."
+        return jsonify(error="No trained model found. Train the model first."), 400
+    try:
+        get_trained_recognizer()
+    except RuntimeError as error:
+        return jsonify(error=str(error)), 503
+    return jsonify(ready=True)
 
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(TRAINER_FILE)
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("❌ Camera not accessible. Trying index 1...")
-        cap = cv2.VideoCapture(1)
-        if not cap.isOpened():
-            return "❌ Camera not accessible."
+@app.route("/recognition_frame", methods=["POST"])
+def recognition_frame():
+    if not os.path.exists(TRAINER_FILE):
+        return jsonify(error="No trained model found. Train the model first."), 400
 
-    cv2.namedWindow("Recognition", cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty("Recognition", cv2.WND_PROP_TOPMOST, 1)
+    frame = decode_browser_frame()
+    if frame is None:
+        return jsonify(error="A valid camera frame is required."), 400
 
-    recognized_ids = set()
+    try:
+        recognizer = get_trained_recognizer()
+    except RuntimeError as error:
+        return jsonify(error=str(error)), 503
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("❌ Failed to read frame.")
-            break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+    students = load_students()
+    results = []
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+    for x, y, width, height in faces:
+        face_image = cv2.resize(gray[y:y + height, x:x + width], (200, 200))
+        with recognizer_lock:
+            student_id, confidence = recognizer.predict(face_image)
 
-        for (x, y, w, h) in faces:
-            face_img = gray[y:y+h, x:x+w]
-            id_, conf = recognizer.predict(face_img)
+        student = students.get(student_id)
+        if confidence < 60 and student:
+            attendance_added = mark_attendance(student_id)
+            results.append({
+                "name": student["name"],
+                "box": [int(x), int(y), int(width), int(height)],
+                "status": "Attendance marked" if attendance_added else "Already marked today",
+            })
+        else:
+            results.append({
+                "name": "Unknown",
+                "box": [int(x), int(y), int(width), int(height)],
+                "status": "Not recognized",
+            })
 
-            if conf < 60:
-                name = students.get(id_, {}).get("name", "Unknown")
-                cv2.putText(frame, name, (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-                if id_ not in recognized_ids:
-                    mark_attendance(id_)
-                    recognized_ids.add(id_)
-            else:
-                cv2.putText(frame, "Unknown", (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
-
-        cv2.imshow("Recognition", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-    print(f"✅ Recognition completed. Recognized {len(recognized_ids)} students.")
-
-    return redirect(url_for("index"))
+    return jsonify(faces=results)
 
 @app.route("/view_attendance")
 def view_attendance():
@@ -370,15 +435,16 @@ def view_attendance():
         time = row[3]
 
         reg_no = students.get(student_id, {}).get("reg_no", "N/A")
-
         records.append({
             "reg_no": reg_no,
             "name": name,
-            "date": date,
+            "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),
             "time": time
         })
 
-    return render_template("view_attendance.html", attendance=records)
+    wb.close()
+    today = datetime.now().strftime("%Y-%m-%d")
+    return render_template("view_attendance.html", attendance=records, today=today)
 
 @app.route("/download_excel_attendance")
 def download_excel_attendance():

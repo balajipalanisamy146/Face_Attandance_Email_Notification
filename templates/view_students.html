@@ -23,7 +23,7 @@
       border: 1px solid rgba(255, 255, 255, 0.25);
       transition: 0.4s;
       border: none;
-      margin-top: 100px;
+      margin-top: 50px;
       margin-left: 30%;
       margin-right: 30%;
     }
@@ -40,21 +40,134 @@
       padding: 8px;
       border-radius: 10px;
     }
-    .cardmain{
-      margin-left: 50px;
-      margin-right: 50px;
-      background-color: #91aeff2f;
+    .student-list{
+      display: grid;
+      gap: 12px;
+      margin: 0 12px;
+    }
+    .student-card{
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.11), rgba(145,174,255,0.09));
+      box-shadow: 0 8px 22px rgba(0,15,42,0.16);
+      transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+    }
+    .student-card:hover{
+      transform: translateY(-2px);
+      border-color: rgba(125,211,252,0.5);
+      box-shadow: 0 12px 26px rgba(0,15,42,0.24);
+    }
+    .student-card-header{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 15px 17px 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.11);
+    }
+    .student-avatar{
+      display: grid;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 42px;
+      place-items: center;
+      border: 1px solid rgba(125,211,252,0.32);
+      border-radius: 13px;
+      background: linear-gradient(145deg, rgba(56,189,248,0.25), rgba(168,85,247,0.2));
+      color: #d9f5ff;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .student-identity{
+      min-width: 0;
+      flex: 1;
+    }
+    .student-label{
+      display: block;
+      margin-bottom: 4px;
+      color: rgba(210,224,255,0.65);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .student-name{
+      overflow-wrap: anywhere;
+      margin: 0;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 650;
+      line-height: 1.25;
+    }
+    .contact-badge{
+      flex: 0 0 auto;
+      padding: 5px 8px;
+      border: 1px solid rgba(74,222,128,0.23);
+      border-radius: 999px;
+      background: rgba(34,197,94,0.12);
+      color: #b6f4cb;
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .contact-badge.missing{
+      border-color: rgba(251,191,36,0.24);
+      background: rgba(251,191,36,0.1);
+      color: #ffe3a0;
+    }
+    .student-details{
+      display: grid;
+      grid-template-columns: minmax(115px, 0.7fr) minmax(0, 1.3fr);
+      gap: 12px;
+      padding: 14px 17px 16px;
+    }
+    .student-detail{
+      min-width: 0;
+    }
+    .detail-label{
+      display: block;
+      margin-bottom: 6px;
+      color: rgba(210,224,255,0.62);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    .detail-value{
+      display: block;
+      overflow-wrap: anywhere;
+      color: #f3f7ff;
+      font-size: 12px;
+      font-weight: 550;
+      line-height: 1.45;
+    }
+    .student-card .detail-value a{
+      display: inline;
+      margin: 0;
+      color: #8de6ff;
+      font-size: 12px;
+      white-space: normal;
+    }
+    .student-card .detail-value a:hover{
+      color: #c3f3ff;
+      text-decoration: underline;
+    }
+    .student-empty{
+      padding: 20px;
+      border: 1px dashed rgba(255,255,255,0.25);
       border-radius: 12px;
-      padding-left: 25px;
-      padding-top: 20px;
-      padding-bottom: 15px;
+      color: rgba(255,255,255,0.8);
+      text-align: center;
     }
-    .cardmain img{
-      margin-bottom: 10px;
+    .student-empty[hidden],
+    .student-card[hidden]{
+      display: none;
     }
-    .edit-btn{
-      margin-top: 10px;
-      margin-left: 20px;
+    @media (max-width: 520px){
+      .student-list{ margin: 0; }
+      .student-card-header{ padding: 13px; }
+      .student-details{ grid-template-columns: 1fr; gap: 12px; padding: 13px; }
+      .contact-badge{ padding: 4px 6px; font-size: 9px; }
     }
     .cardt a{
       display: inline-block;
@@ -125,17 +238,48 @@
         <h2>Student Details</h2>
         
         <!-- Search Bar -->
-        <input type="text" id="searchInput" placeholder="Search by name or register number..." >
+        <input type="text" id="searchInput" placeholder="Search by name, register number or email..." >
 
+        <div class="student-list" id="studentList">
         {% for student in students %}
-        <div class="cardmain" data-name="{{ student.name }}" data-reg="{{ student.reg_no }}">
-            <div class="info">
-                <p><strong>Name:</strong> {{ student.name }}</p>
-                <p><strong>Register No:</strong> {{ student.reg_no }}</p>
-                <p><strong>Parent Email:</strong> {{ student.parent_email }}</p>
+        {% set student_name = student.name|default('', true) %}
+        {% set register_number = student.reg_no|default('', true) %}
+        {% set parent_email = student.parent_email|default(student.parent_email1|default('', true), true) %}
+        <article class="student-card" data-search="{{ (student_name ~ ' ' ~ register_number ~ ' ' ~ parent_email)|lower }}">
+            <div class="student-card-header">
+                <span class="student-avatar" aria-hidden="true">{{ student_name[:1]|upper or '?' }}</span>
+                <div class="student-identity">
+                    <span class="student-label">Student profile</span>
+                    <h3 class="student-name">{{ student_name or 'Name not provided' }}</h3>
+                </div>
+                {% if parent_email %}
+                <span class="contact-badge">Contact available</span>
+                {% else %}
+                <span class="contact-badge missing">Contact missing</span>
+                {% endif %}
             </div>
-        </div>
+            <div class="student-details">
+                <div class="student-detail">
+                    <span class="detail-label">Register number</span>
+                    <span class="detail-value">{{ register_number or 'Not provided' }}</span>
+                </div>
+                <div class="student-detail">
+                    <span class="detail-label">Parent email</span>
+                    <span class="detail-value">
+                        {% if parent_email %}
+                        <a href="mailto:{{ parent_email }}">{{ parent_email }}</a>
+                        {% else %}
+                        Not provided
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </article>
+        {% else %}
+        <div class="student-empty">No student details have been added yet.</div>
         {% endfor %}
+        </div>
+        <p id="noResults" class="student-empty" hidden>No students match your search.</p>
         
         <a href="/">Back to Home</a>
     </div>
@@ -144,23 +288,20 @@
   <script>
     document.getElementById('searchInput').addEventListener('input', function() {
       const searchTerm = this.value.toLowerCase();
-      const cards = document.querySelectorAll('.cardmain');
+      const cards = document.querySelectorAll('.student-card');
+      let visibleCount = 0;
       
       cards.forEach(card => {
-        const name = card.getAttribute('data-name').toLowerCase();
-        const reg = card.getAttribute('data-reg').toLowerCase();
-        
-        if (name.includes(searchTerm) || reg.includes(searchTerm)) {
-          card.style.display = 'block';
-        } else {
-          card.style.display = 'none';
-        }
+        const matches = card.dataset.search.includes(searchTerm);
+        card.hidden = !matches;
+        if (matches) visibleCount += 1;
       });
+
+      document.getElementById('noResults').hidden = visibleCount > 0 || cards.length === 0;
     });
   </script>
   
 </body>
-
 <footer class="footer">
   <div class="footer-content">
     <div class="footer-left">

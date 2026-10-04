@@ -16,18 +16,21 @@
     rel="stylesheet">
 
   <style>
-    recognize-layout {
-      dispnlay: grid;
-      grid-template-columns: 1fr 1fr;
+    .recognize-layout {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+      align-items: stretch;
       gap: 24px;
-      max-width: 1100px;
-      margin-left: 30%;
-      margin-right: 30%;
-      mmargin: 100px auto 40px;
-      padding: 0 16px;
+      width: min(1100px, calc(100% - 32px));
+      margin: 50px auto 40px;
     }
 
     .cardt {
+      position: relative;
+      align-self: center;
+      min-width: 0;
+      width: 100%;
+      max-width: none;
       background: rgba(255, 255, 255, 0.1);
       background: linear-gradient(45deg, #053f5e, #062c72, #044f45);
       backdrop-filter: blur(30px);
@@ -40,10 +43,7 @@
       flex-direction: column;
       display: flex;
       justify-content: center;
-      margin-top: 40px;
-      margin-left: 30%;
-      margin-right: 30%;
-      margin-bottom: 10px;
+      margin: 0;
     }
 
     .cardt h2 {
@@ -51,10 +51,11 @@
     }
 
     .cardt button {
-      margin-left: 25%;
-      margin-right: 25%;
+      align-self: center;
+      width: min(100%, 240px);
       margin-bottom: 20px;
       font-size: medium;
+      white-space: normal;
     }
 
     .cardt a {
@@ -87,22 +88,24 @@
     }
 
     .preview-card {
+      position: relative;
+      min-width: 0;
       background: rgba(255, 255, 255, 0.1);
       background: linear-gradient(45deg, #0b2a4f, #0d3b65, #03444b);
       backdrop-filter: blur(30px);
       padding: 20px;
       border-radius: 10px;
       border: 1px solid rgba(255, 255, 255, 0.25);
-      min-height: 360px;
+      min-height: 0;
+      width: 100%;
+      margin: 0;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      gap: 16px;
+      gap: 10px;
       text-align: center;
       color: #f3f7ff;
-      margin-left: 30%;
-      margin-right: 30% ;
     }
 
     .preview-card h2 {
@@ -113,6 +116,77 @@
       margin: 0;
       line-height: 1.5;
       color: #dce8ff;
+    }
+
+    .camera-picker {
+      display: grid;
+      width: 100%;
+      gap: 6px;
+      text-align: left;
+    }
+
+    .camera-picker label {
+      color: #dce8ff;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .camera-picker select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 9px;
+      background: #fff;
+      color: #15213a;
+      font: inherit;
+    }
+
+    .preview-media {
+      position: relative;
+      width: 100%;
+      height: 240px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    #recognitionVideo {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #faceOverlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    #recognitionStatus {
+      min-height: 24px;
+    }
+
+    #recognizedFaces {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    #recognizedFaces li {
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f3f7ff;
+      font-size: 13px;
     }
 
 
@@ -144,6 +218,37 @@
         background-position: 0% 50%;
       }
     }
+
+    @media (max-width: 760px) {
+      .recognize-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .cardt,
+      .preview-card {
+        width: 100%;
+        max-width: none;
+        min-height: 0;
+        margin: 0;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .recognize-layout {
+        width: calc(100% - 24px);
+        gap: 16px;
+      }
+
+      .cardt,
+      .preview-card {
+        padding: 18px;
+      }
+
+      .preview-media {
+        min-height: 180px;
+        height: 200px;
+      }
+    }
   </style>
 
 </head>
@@ -157,20 +262,134 @@
   <div class="recognize-layout">
     <div class="cardt">
       <h2>Recognize Student & Mark Attendance</h2>
-      <form onsubmit="event.preventDefault();">
-  <button type="button" onclick="fetch('/start_recognition', {method: 'POST'}); if(typeof startCamera === 'function') startCamera();">
-    Start Live Attendance
-  </button>
-</form>
+      <button id="startRecognition" type="button">Start Live Attendance</button>
+      <button id="stopRecognition" type="button" hidden>Stop Camera</button>
+      <p id="recognitionStatus" aria-live="polite">Start the camera to recognize students and mark attendance.</p>
       <a href="/">Back to Home</a>
     </div>
 
     <div class="preview-card">
       <h2>Camera Preview</h2>
-      <p>Camera feed from recognition will be shown in a window of this size.</p>
-      <p>Use this card as a placeholder for the webcam view.</p>
+      <div class="camera-picker">
+        <label for="recognitionCameraDevice">Laptop webcam</label>
+        <select id="recognitionCameraDevice" aria-label="Choose laptop webcam">
+          <option value="">Auto-select laptop webcam</option>
+        </select>
+      </div>
+      <div class="preview-media">
+        <video id="recognitionVideo" autoplay playsinline muted></video>
+        <canvas id="faceOverlay"></canvas>
+      </div>
+      <ul id="recognizedFaces" aria-live="polite"></ul>
     </div>
   </div>
+
+  <script src="{{ url_for('static', filename='camera.js', v=4) }}"></script>
+  <script>
+    const recognitionVideo = document.getElementById("recognitionVideo");
+    const recognitionCameraDevice = document.getElementById("recognitionCameraDevice");
+    const faceOverlay = document.getElementById("faceOverlay");
+    const overlayContext = faceOverlay.getContext("2d");
+    const recognitionStatus = document.getElementById("recognitionStatus");
+    const recognizedFaces = document.getElementById("recognizedFaces");
+    const startRecognitionButton = document.getElementById("startRecognition");
+    const stopRecognitionButton = document.getElementById("stopRecognition");
+    let recognitionRunning = false;
+
+    function stopRecognition(message) {
+      recognitionRunning = false;
+      faceCamera.stop(recognitionVideo);
+      overlayContext.clearRect(0, 0, faceOverlay.width, faceOverlay.height);
+      startRecognitionButton.disabled = false;
+      stopRecognitionButton.hidden = true;
+      if (message) recognitionStatus.textContent = message;
+    }
+
+    function drawRecognizedFaces(faces, width, height) {
+      faceOverlay.width = width;
+      faceOverlay.height = height;
+      overlayContext.clearRect(0, 0, width, height);
+      recognizedFaces.replaceChildren();
+
+      faces.forEach((face) => {
+        const [x, y, boxWidth, boxHeight] = face.box;
+        const isRecognized = face.name !== "Unknown";
+        overlayContext.strokeStyle = isRecognized ? "#22c55e" : "#ef4444";
+        overlayContext.lineWidth = Math.max(2, width / 320);
+        overlayContext.strokeRect(x, y, boxWidth, boxHeight);
+        overlayContext.font = `bold ${Math.max(14, width / 32)}px sans-serif`;
+        overlayContext.fillStyle = overlayContext.strokeStyle;
+        overlayContext.fillText(face.name, x, Math.max(18, y - 8));
+
+        const item = document.createElement("li");
+        item.textContent = `${face.name} — ${face.status}`;
+        recognizedFaces.appendChild(item);
+      });
+
+      recognitionStatus.textContent = faces.length
+        ? `${faces.length} face${faces.length === 1 ? "" : "s"} detected.`
+        : "No face detected. Look at the camera.";
+    }
+
+    async function processRecognitionFrames() {
+      try {
+        while (recognitionRunning) {
+          const frame = await faceCamera.captureFrame(recognitionVideo);
+          const body = new FormData();
+          body.append("frame", frame.blob, "camera.jpg");
+
+          const response = await fetch("/recognition_frame", { method: "POST", body });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Recognition request failed.");
+
+          drawRecognizedFaces(result.faces, frame.width, frame.height);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        stopRecognition(error.message);
+      }
+    }
+
+    startRecognitionButton.addEventListener("click", async () => {
+      startRecognitionButton.disabled = true;
+      recognitionStatus.textContent = "Checking the trained face model...";
+
+      try {
+        const response = await fetch("/start_recognition", { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not start recognition.");
+
+        recognitionStatus.textContent = "Requesting browser camera permission...";
+        await faceCamera.start(recognitionVideo, recognitionCameraDevice);
+        recognitionRunning = true;
+        stopRecognitionButton.hidden = false;
+        recognitionStatus.textContent = "Camera connected. Looking for faces...";
+        processRecognitionFrames();
+      } catch (error) {
+        stopRecognition(error.message);
+      }
+    });
+
+    stopRecognitionButton.addEventListener("click", () => {
+      stopRecognition("Camera stopped.");
+    });
+
+    faceCamera.updateCameraList(recognitionCameraDevice).catch((error) => {
+      recognitionStatus.textContent = error.message;
+    });
+
+    recognitionCameraDevice.addEventListener("change", async () => {
+      if (!recognitionVideo.srcObject) return;
+      try {
+        recognitionStatus.textContent = "Switching webcam...";
+        await faceCamera.start(recognitionVideo, recognitionCameraDevice);
+        recognitionStatus.textContent = "Webcam preview updated.";
+      } catch (error) {
+        stopRecognition(error.message);
+      }
+    });
+  </script>
+
 </body>
 
 <footer class="footer">

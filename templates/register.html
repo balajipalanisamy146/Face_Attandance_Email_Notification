@@ -148,22 +148,24 @@
 
 
     .preview-card {
+      position: relative;
+      min-width: 0;
       background: rgba(255, 255, 255, 0.1);
       background: linear-gradient(45deg, #0b2a4f, #0d3b65, #03444b);
       backdrop-filter: blur(30px);
       padding: 20px;
       border-radius: 10px;
       border: 1px solid rgba(255, 255, 255, 0.25);
-      min-height: 360px;
+      height: 500px;
+      min-height: 500px;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      gap: 16px;
+      gap: 10px;
       text-align: center;
       color: #f3f7ff;
-      margin-top: 12%;
-      margin-bottom: 12%;
+      margin: 0;
     }
 
     .preview-card h2 {
@@ -176,6 +178,57 @@
       color: #dce8ff;
     }
 
+    .camera-picker {
+      display: grid;
+      width: 100%;
+      gap: 6px;
+      text-align: left;
+    }
+
+    .camera-picker label {
+      color: #dce8ff;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .camera-picker select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 9px;
+      background: #fff;
+      color: #15213a;
+      font: inherit;
+    }
+
+    .preview-media {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      min-height: 220px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    #cameraPreview {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #captureStatus {
+      min-height: 24px;
+    }
+
+    #stopCapture {
+      display: block;
+      margin: 0 auto;
+    }
 
     .preview-card::before {
       content: "";
@@ -213,6 +266,19 @@
         background-position: 0% 50%;
       }
     }
+
+    @media (max-width: 760px) {
+      .recognize-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .cardt,
+      .preview-card {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+      }
+    }
   </style>
 
 </head>
@@ -227,7 +293,7 @@
     <div class="cardt">
       <h2>📸 Register Student</h2>
 
-      <form action="/register" method="post">
+      <form id="registerForm" action="/register" method="post">
         <div class="form-group">
           <label for="name">Student Name</label>
           <input id="name" type="text" name="name" placeholder="Enter student name" required>
@@ -243,7 +309,7 @@
           <input id="parent_email" type="email" name="parent_email" placeholder="Enter parent email" required>
         </div>
 
-        <button type="submit">Capture Face & Save</button>
+        <button id="registerButton" type="submit">Capture Face & Save</button>
       </form>
 
       <div class="message-box">
@@ -257,10 +323,145 @@
 
     <div class="preview-card">
       <h2>Camera Preview</h2>
-      <p>Camera feed from recognition will be shown in a window of this size.</p>
-      <p>Use this card as a placeholder for the webcam view.</p>
+      <div class="camera-picker">
+        <label for="cameraDevice">Laptop webcam</label>
+        <select id="cameraDevice" aria-label="Choose laptop webcam">
+          <option value="">Auto-select laptop webcam</option>
+        </select>
+      </div>
+      <div class="preview-media">
+        <video id="cameraPreview" autoplay playsinline muted></video>
+      </div>
+      <p id="captureStatus" aria-live="polite">Choose your laptop webcam if needed, then submit the form to start camera capture.</p>
+      <button id="stopCapture" type="button" hidden>Stop capture</button>
+      <button id="resumeCapture" type="button" hidden>Resume capture</button>
     </div>
   </div>
+
+  <script src="{{ url_for('static', filename='camera.js', v=4) }}"></script>
+  <script>
+    const registerForm = document.getElementById("registerForm");
+    const registerButton = document.getElementById("registerButton");
+    const cameraPreview = document.getElementById("cameraPreview");
+    const captureStatus = document.getElementById("captureStatus");
+    const cameraDevice = document.getElementById("cameraDevice");
+    const stopCaptureButton = document.getElementById("stopCapture");
+    const resumeCaptureButton = document.getElementById("resumeCapture");
+    let captureRequested = false;
+    let pendingRegistration = null;
+    let capturedCount = 0;
+
+    async function captureStudentFrames() {
+      while (captureRequested && capturedCount < pendingRegistration.target_images) {
+        const frame = await faceCamera.captureFrame(cameraPreview);
+        const body = new FormData();
+        body.append("frame", frame.blob, "camera.jpg");
+
+        const response = await fetch(`/capture_frame/${pendingRegistration.student_id}`, {
+          method: "POST",
+          body
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not save the camera frame.");
+
+        capturedCount = result.captured;
+        captureStatus.textContent = result.complete
+          ? `Captured ${capturedCount} of ${pendingRegistration.target_images} face images. Registration complete.`
+          : `${result.message || "Capturing face"} ${capturedCount}/${pendingRegistration.target_images}`;
+
+        if (result.complete) {
+          pendingRegistration = null;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    async function resumeStudentCapture() {
+      if (!pendingRegistration) return;
+      captureRequested = true;
+      registerButton.disabled = true;
+      stopCaptureButton.hidden = false;
+      resumeCaptureButton.hidden = true;
+
+      try {
+        captureStatus.textContent = "Requesting browser camera permission...";
+        await faceCamera.start(cameraPreview, cameraDevice);
+        await captureStudentFrames();
+      } catch (error) {
+        captureStatus.textContent = error.message;
+      } finally {
+        captureRequested = false;
+        faceCamera.stop(cameraPreview);
+        stopCaptureButton.hidden = true;
+        resumeCaptureButton.hidden = !pendingRegistration;
+        registerButton.disabled = false;
+      }
+    }
+
+    registerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (pendingRegistration) {
+        captureStatus.textContent = "Resume the saved student capture instead of creating a duplicate registration.";
+        return;
+      }
+      if (!registerForm.reportValidity()) return;
+
+      registerButton.disabled = true;
+      captureRequested = true;
+      stopCaptureButton.hidden = false;
+      resumeCaptureButton.hidden = true;
+
+      try {
+        captureStatus.textContent = "Requesting camera permission...";
+        await faceCamera.start(cameraPreview, cameraDevice);
+        if (!captureRequested) return;
+
+        const formData = new FormData(registerForm);
+        const registrationResponse = await fetch(registerForm.action, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.fromEntries(formData.entries()))
+        });
+        const registration = await registrationResponse.json();
+        if (!registrationResponse.ok) throw new Error(registration.error || "Could not register student.");
+
+        pendingRegistration = registration;
+        capturedCount = 0;
+        await captureStudentFrames();
+      } catch (error) {
+        captureStatus.textContent = error.message;
+      } finally {
+        captureRequested = false;
+        faceCamera.stop(cameraPreview);
+        stopCaptureButton.hidden = true;
+        resumeCaptureButton.hidden = !pendingRegistration;
+        registerButton.disabled = false;
+      }
+    });
+
+    resumeCaptureButton.addEventListener("click", resumeStudentCapture);
+
+    stopCaptureButton.addEventListener("click", () => {
+      captureRequested = false;
+      faceCamera.stop(cameraPreview);
+    });
+
+    faceCamera.updateCameraList(cameraDevice).catch((error) => {
+      captureStatus.textContent = error.message;
+    });
+
+    cameraDevice.addEventListener("change", async () => {
+      if (!cameraPreview.srcObject) return;
+      try {
+        captureStatus.textContent = "Switching webcam...";
+        await faceCamera.start(cameraPreview, cameraDevice);
+        captureStatus.textContent = "Webcam preview updated.";
+      } catch (error) {
+        captureStatus.textContent = error.message;
+      }
+    });
+  </script>
 
 </body>
 <footer class="footer">
