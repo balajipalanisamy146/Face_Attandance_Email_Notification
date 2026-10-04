@@ -134,7 +134,7 @@ def initialize_database():
         return
 
     if not DATABASE_URL:
-        print("⚠️ DATABASE_URL not configured.")
+        print("DATABASE_URL not configured.")
         return
 
     conn = None
@@ -176,12 +176,12 @@ def initialize_database():
 
         conn.commit()
 
-        print("✅ Supabase database connected.")
-        print("✅ Database tables ready.")
+        print("Supabase database connected.")
+        print("Database tables ready.")
 
     except Exception as e:
 
-        print("❌ Database initialization error:", e)
+        print("Database initialization error:", e)
 
     finally:
 
@@ -288,13 +288,13 @@ Attendance System
                 msg.as_string()
             )
 
-        print("✅ Email sent to", to_email)
+        print("Email sent to", to_email)
 
         return True
 
     except Exception as e:
 
-        print("❌ Email Error:", e)
+        print("Email Error:", e)
 
         return False
 
@@ -415,7 +415,7 @@ def load_students():
     except Exception as e:
 
         print(
-            "❌ Error loading students:",
+            "Error loading students:",
             e
         )
 
@@ -730,7 +730,7 @@ def train_lbph():
     if not hasattr(cv2, "face"):
 
         print(
-            "❌ cv2.face is unavailable."
+            "cv2.face is unavailable."
         )
 
         return False
@@ -757,7 +757,7 @@ def train_lbph():
         ):
 
             print(
-                "❌ Folder Missing:",
+                "Folder Missing:",
                 person_dir
             )
 
@@ -786,7 +786,7 @@ def train_lbph():
     if len(faces) == 0:
 
         print(
-            "❌ No training images found!"
+            "No training images found!"
         )
 
         return False
@@ -806,7 +806,7 @@ def train_lbph():
         cached_trainer_mtime = None
 
     print(
-        "✅ Training Completed Successfully!"
+        "Training Completed Successfully!"
     )
 
     return True
@@ -1153,7 +1153,7 @@ def notify_today():
         if conn is None:
 
             message = (
-                "❌ Database connection "
+                "Database connection "
                 "not configured."
             )
 
@@ -1221,7 +1221,7 @@ def notify_today():
             conn.close()
 
     message = (
-        f"✅ Notifications sent to "
+        f"Notifications sent to "
         f"{sent} students present today."
     )
 
@@ -1300,7 +1300,7 @@ def register():
         except Exception as error:
 
             print(
-                "❌ Registration error:",
+                "Registration error:",
                 error
             )
 
@@ -1512,13 +1512,13 @@ def train():
         if train_lbph():
 
             message = (
-                "✅ Training Completed Successfully!"
+                "Training Completed Successfully!"
             )
 
         else:
 
             message = (
-                "❌ No Dataset Found. "
+                "No Dataset Found. "
                 "Please Register Students First."
             )
 
