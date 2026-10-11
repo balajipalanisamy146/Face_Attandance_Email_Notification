@@ -10,6 +10,7 @@ import psycopg2
 
 from io import BytesIO
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from flask import (
     Flask,
@@ -1012,15 +1013,15 @@ def mark_attendance(student_id):
     reg_no = student["reg_no"]
     email = student["parent_email"]
 
-    now = datetime.now()
+    
+    if IS_RENDER:
+      now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    else:
+      now = datetime.now()
 
-    date_str = now.strftime(
-        "%Y-%m-%d"
-    )
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
 
-    time_str = now.strftime(
-        "%H:%M:%S"
-    )
 
     # ========================================================
     # LOCAL
