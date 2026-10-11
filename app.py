@@ -110,55 +110,95 @@ FACE_IMAGES_PREFIX = "students"
 MODEL_STORAGE_PATH = "models/trainer.yml"
 
 
-def list_cloud_face_images(student_id):
-    """Return image paths stored for a student in Supabase."""
 
-    if not IS_RENDER or supabase_storage is None:
+def list_cloud_face_images(student_id):
+    """List face images stored for a student in Supabase Storage."""
+
+    if not IS_RENDER:
         return []
+
+    if supabase_storage is None:
+        raise RuntimeError("Supabase Storage is not configured.")
 
     folder = f"{FACE_IMAGES_PREFIX}/{student_id}"
 
-    result = supabase_storage.storage.from_(
-        FACE_BUCKET
-    ).list(folder)
+    try:
+        result = (
+            supabase_storage
+            .storage
+            .from_(FACE_BUCKET)
+            .list(
+                folder,
+                {
+                    "limit": 100,
+                    "offset": 0
+                }
+            )
+        )
 
-    image_paths = []
+        image_paths = []
 
-    for item in result or []:
-        filename = item.get("name", "")
+        for item in result or []:
+            filename = item.get("name", "")
 
-        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            image_paths.append(f"{folder}/{filename}")
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+                image_paths.append(f"{folder}/{filename}")
 
-    return sorted(
-        image_paths,
-        key=lambda path: int(
-            os.path.splitext(path.rsplit("/", 1)[-1])[0]
-        ) if os.path.splitext(path.rsplit("/", 1)[-1])[0].isdigit()
-        else path
-    )
+        def sort_key(path):
+            filename = os.path.splitext(path.rsplit("/", 1)[-1])[0]
+            if filename.isdigit():
+                return (0, int(filename))
+            return (1, filename)
+
+        return sorted(image_paths, key=sort_key)
+
+    except Exception as error:
+        app.logger.exception(
+            "Unable to list face images in Supabase Storage: %s",
+            folder
+        )
+        raise RuntimeError(
+            "Could not list face images in Supabase Storage."
+        ) from error
+
 
 
 def upload_face_image(student_id, image_number, image_bytes):
-    """Upload one captured face image to the private bucket."""
+    """Upload one captured face image to Supabase Storage."""
 
-    path = (
-        f"{FACE_IMAGES_PREFIX}/{student_id}/"
-        f"{image_number}.jpg"
-    )
+    if not IS_RENDER or supabase_storage is None:
+        raise RuntimeError("Supabase Storage is not configured.")
 
-    supabase_storage.storage.from_(
-        FACE_BUCKET
-    ).upload(
-        path,
-        image_bytes,
-        file_options={
-            "content-type": "image/jpeg",
-            "upsert": "true"
-        }
-    )
+    path = f"{FACE_IMAGES_PREFIX}/{student_id}/{image_number}.jpg"
 
-    return path
+    try:
+        result = (
+            supabase_storage.storage
+            .from_(FACE_BUCKET)
+            .upload(
+                path,
+                image_bytes,
+                file_options={
+                    "content-type": "image/jpeg",
+                    "upsert": "true"
+                }
+            )
+        )
+
+        app.logger.info(
+            "Face image uploaded successfully: %s",
+            path
+        )
+        return result
+
+    except Exception:
+        app.logger.exception(
+            "Supabase upload failed. Bucket=%s, path=%s",
+            FACE_BUCKET,
+            path
+        )
+        raise
+
 
 
 def download_trainer_from_cloud():
@@ -1678,17 +1718,6 @@ def start_recognition():
     methods=["POST"]
 )
 def recognition_frame():
-
-    if not os.path.exists(
-        TRAINER_FILE
-    ):
-
-        return jsonify(
-            error=(
-                "No trained model found. "
-                "Train the model first."
-            )
-        ), 400
 
     frame = decode_browser_frame()
 
