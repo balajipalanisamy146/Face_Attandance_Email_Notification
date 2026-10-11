@@ -2064,6 +2064,50 @@ def dashboard():
     )
 
 
+@app.route("/debug_model")
+def debug_model():
+    students = load_students()
+
+    student_folders = []
+    total_images = 0
+
+    for student_id, info in students.items():
+        folder = student_dataset_dir(
+            student_id,
+            info["name"]
+        )
+
+        images = []
+
+        if os.path.isdir(folder):
+            images = [
+                f for f in os.listdir(folder)
+                if f.lower().endswith(
+                    (".jpg", ".jpeg", ".png")
+                )
+            ]
+
+        total_images += len(images)
+
+        student_folders.append({
+            "student_id": student_id,
+            "folder": folder,
+            "folder_exists": os.path.isdir(folder),
+            "image_count": len(images)
+        })
+
+    return jsonify({
+        "render_mode": IS_RENDER,
+        "students_in_database": len(students),
+        "dataset_dir": os.path.abspath(DATASET_DIR),
+        "dataset_dir_exists": os.path.isdir(DATASET_DIR),
+        "trainer_file": os.path.abspath(TRAINER_FILE),
+        "trainer_exists": os.path.isfile(TRAINER_FILE),
+        "total_images": total_images,
+        "student_folders": student_folders
+    })
+
+
 # ============================================================
 # HEALTH CHECK
 # ============================================================
