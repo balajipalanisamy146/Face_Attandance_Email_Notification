@@ -23,7 +23,8 @@ from openpyxl import Workbook, load_workbook
 from email.mime.text import MIMEText
 from werkzeug.utils import secure_filename
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv 
+from supabase import create_client
 
 load_dotenv()
 
@@ -76,6 +77,141 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+
+
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv(
+    "SUPABASE_SERVICE_ROLE_KEY"
+)
+
+supabase_storage = None
+
+if IS_RENDER:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError(
+            "Supabase Storage credentials are missing."
+        )
+
+    supabase_storage = create_client(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY
+    )
+
+FACE_BUCKET = "face-datasets"
+
+
+
+# ============================================================
+# SUPABASE STORAGE HELPERS — RENDER ONLY
+# ============================================================
+
+FACE_IMAGES_PREFIX = "students"
+MODEL_STORAGE_PATH = "models/trainer.yml"
+
+
+def list_cloud_face_images(student_id):
+    """Return image paths stored for a student in Supabase."""
+
+    if not IS_RENDER or supabase_storage is None:
+        return []
+
+    folder = f"{FACE_IMAGES_PREFIX}/{student_id}"
+
+    result = supabase_storage.storage.from_(
+        FACE_BUCKET
+    ).list(folder)
+
+    image_paths = []
+
+    for item in result or []:
+        filename = item.get("name", "")
+
+        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            image_paths.append(f"{folder}/{filename}")
+
+    return sorted(
+        image_paths,
+        key=lambda path: int(
+            os.path.splitext(path.rsplit("/", 1)[-1])[0]
+        ) if os.path.splitext(path.rsplit("/", 1)[-1])[0].isdigit()
+        else path
+    )
+
+
+def upload_face_image(student_id, image_number, image_bytes):
+    """Upload one captured face image to the private bucket."""
+
+    path = (
+        f"{FACE_IMAGES_PREFIX}/{student_id}/"
+        f"{image_number}.jpg"
+    )
+
+    supabase_storage.storage.from_(
+        FACE_BUCKET
+    ).upload(
+        path,
+        image_bytes,
+        file_options={
+            "content-type": "image/jpeg",
+            "upsert": "true"
+        }
+    )
+
+    return path
+
+
+def download_trainer_from_cloud():
+    """Download the trained model into the local runtime cache."""
+
+    if not IS_RENDER or supabase_storage is None:
+        return False
+
+    try:
+        model_bytes = supabase_storage.storage.from_(
+            FACE_BUCKET
+        ).download(MODEL_STORAGE_PATH)
+
+        if not model_bytes:
+            return False
+
+        os.makedirs(
+            os.path.dirname(TRAINER_FILE),
+            exist_ok=True
+        )
+
+        with open(TRAINER_FILE, "wb") as model_file:
+            model_file.write(model_bytes)
+
+        return True
+
+    except Exception as error:
+        print("Cloud model download failed:", error)
+        return False
+
+
+def upload_trainer_to_cloud():
+    """Persist trainer.yml in Supabase Storage."""
+
+    if not IS_RENDER or supabase_storage is None:
+        return True
+
+    with open(TRAINER_FILE, "rb") as model_file:
+        model_bytes = model_file.read()
+
+    supabase_storage.storage.from_(
+        FACE_BUCKET
+    ).upload(
+        MODEL_STORAGE_PATH,
+        model_bytes,
+        file_options={
+            "content-type": "application/octet-stream",
+            "upsert": "true"
+        }
+    )
+
+    print("Trained model uploaded to Supabase Storage.")
+    return True
 
 
 
@@ -665,80 +801,61 @@ def student_dataset_dir(
 # TRAINED RECOGNIZER
 # ============================================================
 
-def get_trained_recognizer():
 
+def get_trained_recognizer():
     global cached_recognizer
     global cached_trainer_mtime
 
-    if not os.path.exists(
-        TRAINER_FILE
-    ):
-
+    if not hasattr(cv2, "face"):
         raise RuntimeError(
-            "No trained model found. "
-            "Train the model first."
+            "OpenCV face recognition is unavailable. "
+            "Install opencv-contrib-python-headless."
         )
 
-    trainer_mtime = os.path.getmtime(
-        TRAINER_FILE
-    )
-
     with recognizer_lock:
+        # Fetch the persistent model when this process first needs it.
+        if IS_RENDER and cached_recognizer is None:
+            if not download_trainer_from_cloud():
+                raise RuntimeError(
+                    "No trained model found in Supabase Storage. "
+                    "Capture face images and train the model first."
+                )
+
+        if not os.path.isfile(TRAINER_FILE):
+            raise RuntimeError(
+                "No trained model found. Train the model first."
+            )
+
+        trainer_mtime = os.path.getmtime(TRAINER_FILE)
 
         if (
             cached_recognizer is None
-            or cached_trainer_mtime
-            != trainer_mtime
+            or cached_trainer_mtime != trainer_mtime
         ):
-
-            if not hasattr(cv2, "face"):
-
-                raise RuntimeError(
-                    "OpenCV face recognition "
-                    "is unavailable. "
-                    "Install "
-                    "opencv-contrib-python-headless."
-                )
-
-            recognizer = (
-                cv2.face
-                .LBPHFaceRecognizer_create()
-            )
-
-            recognizer.read(
-                TRAINER_FILE
-            )
+            recognizer = cv2.face.LBPHFaceRecognizer_create()
+            recognizer.read(TRAINER_FILE)
 
             cached_recognizer = recognizer
-
-            cached_trainer_mtime = (
-                trainer_mtime
-            )
+            cached_trainer_mtime = trainer_mtime
 
         return cached_recognizer
+
 
 
 # ============================================================
 # TRAIN MODEL
 # ============================================================
 
-def train_lbph():
 
+def train_lbph():
     global cached_recognizer
     global cached_trainer_mtime
 
     if not hasattr(cv2, "face"):
-
-        print(
-            "cv2.face is unavailable."
-        )
-
+        print("cv2.face is unavailable.")
         return False
 
-    recognizer = (
-        cv2.face
-        .LBPHFaceRecognizer_create()
-    )
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
 
     faces = []
     labels = []
@@ -747,69 +864,91 @@ def train_lbph():
 
     for student_id, info in students.items():
 
-        person_dir = student_dataset_dir(
-            student_id,
-            info["name"]
-        )
+        if IS_RENDER:
+            # Read the student's face images from Supabase Storage.
+            try:
+                image_paths = list_cloud_face_images(student_id)
 
-        if not os.path.exists(
-            person_dir
-        ):
+                for image_path in image_paths:
+                    image_bytes = supabase_storage.storage.from_(
+                        FACE_BUCKET
+                    ).download(image_path)
 
-            print(
-                "Folder Missing:",
-                person_dir
+                    img = cv2.imdecode(
+                        np.frombuffer(image_bytes, dtype=np.uint8),
+                        cv2.IMREAD_GRAYSCALE
+                    )
+
+                    if img is None:
+                        print("Invalid cloud image:", image_path)
+                        continue
+
+                    faces.append(img)
+                    labels.append(int(student_id))
+
+            except Exception as error:
+                print(
+                    f"Could not retrieve images for student {student_id}:",
+                    error
+                )
+                return False
+
+        else:
+            # Preserve the existing local dataset behaviour.
+            person_dir = student_dataset_dir(
+                student_id, info["name"]
             )
 
-            continue
-
-        for img_file in os.listdir(
-            person_dir
-        ):
-
-            img_path = os.path.join(
-                person_dir,
-                img_file
-            )
-
-            img = cv2.imread(
-                img_path,
-                cv2.IMREAD_GRAYSCALE
-            )
-
-            if img is None:
+            if not os.path.isdir(person_dir):
+                print("Folder Missing:", person_dir)
                 continue
 
-            faces.append(img)
-            labels.append(student_id)
+            for img_file in os.listdir(person_dir):
+                if not img_file.lower().endswith(
+                    (".jpg", ".jpeg", ".png")
+                ):
+                    continue
 
-    if len(faces) == 0:
+                img_path = os.path.join(person_dir, img_file)
+                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
-        print(
-            "No training images found!"
-        )
+                if img is None:
+                    continue
 
+                faces.append(img)
+                labels.append(int(student_id))
+
+    if not faces:
+        print("No training images found!")
         return False
 
-    recognizer.train(
-        faces,
-        np.array(labels)
-    )
+    try:
+        recognizer.train(faces, np.array(labels, dtype=np.int32))
 
-    recognizer.save(
-        TRAINER_FILE
-    )
+        os.makedirs(
+            os.path.dirname(os.path.abspath(TRAINER_FILE)),
+            exist_ok=True
+        )
+
+        recognizer.save(TRAINER_FILE)
+
+        # On Render, save a persistent copy in Supabase Storage.
+        if IS_RENDER:
+            upload_trainer_to_cloud()
+
+    except Exception as error:
+        print("Model training or upload failed:", error)
+        return False
 
     with recognizer_lock:
-
         cached_recognizer = None
         cached_trainer_mtime = None
 
     print(
-        "Training Completed Successfully!"
+        f"Training completed successfully using {len(faces)} images."
     )
-
     return True
+
 
 
 # ============================================================
@@ -1326,173 +1465,132 @@ def register():
 # CAPTURE FRAME
 # ============================================================
 
-@app.route(
-    "/capture_frame/<int:student_id>",
-    methods=["POST"]
-)
-def capture_frame(student_id):
 
+@app.route("/capture_frame/<int:student_id>", methods=["POST"])
+def capture_frame(student_id):
     students = load_students()
 
     if student_id not in students:
-
         return jsonify(
-            error=(
-                "Student registration "
-                "was not found."
-            )
+            error="Student registration was not found."
         ), 404
 
     frame = decode_browser_frame()
 
     if frame is None:
-
         return jsonify(
-            error=(
-                "A valid camera frame "
-                "is required."
-            )
+            error="A valid camera frame is required."
         ), 400
 
-    gray = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2GRAY
-    )
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     faces = face_cascade.detectMultiScale(
-        gray,
-        1.3,
-        5
+        gray, 1.3, 5
     )
 
-    student_dir = os.path.join(
-        DATASET_DIR,
-        str(student_id)
-    )
-
-    os.makedirs(
-        student_dir,
-        exist_ok=True
-    )
-
-    captured_files = [
-
-        filename
-
-        for filename in os.listdir(
-            student_dir
-        )
-
-        if filename.lower().endswith(
-            (
-                ".jpg",
-                ".jpeg",
-                ".png"
+    # Count existing images in the correct storage.
+    try:
+        if IS_RENDER:
+            existing_images = list_cloud_face_images(student_id)
+            captured_count = len(existing_images)
+        else:
+            student_dir = os.path.join(
+                DATASET_DIR, str(student_id)
             )
-        )
-    ]
+            os.makedirs(student_dir, exist_ok=True)
 
-    captured_count = len(
-        captured_files
-    )
+            existing_images = [
+                f for f in os.listdir(student_dir)
+                if f.lower().endswith((".jpg", ".jpeg", ".png"))
+            ]
+            captured_count = len(existing_images)
+
+    except Exception as error:
+        print("Unable to list face images:", error)
+        return jsonify(
+            error="Unable to access face-image storage. Check Supabase Storage configuration."
+        ), 503
 
     if captured_count >= 30:
-
-        return jsonify(
-            captured=captured_count,
-            complete=True
-        )
+        return jsonify(captured=captured_count, complete=True)
 
     if len(faces) == 0:
-
         return jsonify(
             captured=captured_count,
             complete=False,
-            message=(
-                "No face detected. "
-                "Look at the camera."
-            )
+            message="No face detected. Look at the camera."
         )
 
     if len(faces) > 1:
-
         return jsonify(
             captured=captured_count,
             complete=False,
-            message=(
-                "Only one person "
-                "should be in the frame."
-            )
+            message="Only one person should be in the frame."
         )
 
     now = time.monotonic()
 
     with capture_lock:
+        last_capture = capture_last_frame_at.get(student_id, 0)
 
-        last_capture = (
-            capture_last_frame_at.get(
-                student_id,
-                0
-            )
-        )
-
-        if (
-            now - last_capture
-            < 0.85
-        ):
-
+        if now - last_capture < 0.85:
             return jsonify(
                 captured=captured_count,
                 complete=False,
-                message=(
-                    "Hold still for "
-                    "a moment."
-                )
+                message="Hold still for a moment."
             )
 
         x, y, width, height = faces[0]
 
         face_image = cv2.resize(
-            gray[
-                y:y + height,
-                x:x + width
-            ],
+            gray[y:y + height, x:x + width],
             (200, 200)
         )
 
-        filename = os.path.join(
-            student_dir,
-            f"{captured_count + 1}.jpg"
-        )
+        next_image_number = captured_count + 1
 
-        if not cv2.imwrite(
-            filename,
-            face_image
-        ):
+        if IS_RENDER:
+            success, encoded = cv2.imencode(".jpg", face_image)
 
-            return jsonify(
-                error=(
-                    "Could not save "
-                    "the captured face image."
+            if not success:
+                return jsonify(
+                    error="Could not encode captured face image."
+                ), 500
+
+            try:
+                upload_face_image(
+                    student_id,
+                    next_image_number,
+                    encoded.tobytes()
                 )
-            ), 500
+            except Exception as error:
+                print("Supabase face upload failed:", error)
+                return jsonify(
+                    error="Could not upload face image to Supabase Storage."
+                ), 503
 
-        capture_last_frame_at[
-            student_id
-        ] = now
+        else:
+            filename = os.path.join(
+                DATASET_DIR,
+                str(student_id),
+                f"{next_image_number}.jpg"
+            )
 
-        captured_count += 1
+            if not cv2.imwrite(filename, face_image):
+                return jsonify(
+                    error="Could not save the captured face image."
+                ), 500
+
+        capture_last_frame_at[student_id] = now
+        captured_count = next_image_number
 
     return jsonify(
         captured=captured_count,
-        complete=(
-            captured_count >= 30
-        ),
+        complete=captured_count >= 30,
         message=(
             "Face captured."
             if captured_count < 30
-            else
-            "Registration photos captured."
+            else "Registration photos captured."
         )
     )
 
@@ -1552,32 +1650,23 @@ def recognize():
     "/start_recognition",
     methods=["POST"]
 )
+
 def start_recognition():
-
-    if not os.path.exists(
-        TRAINER_FILE
-    ):
-
-        return jsonify(
-            error=(
-                "No trained model found. "
-                "Train the model first."
-            )
-        ), 400
-
     try:
-
         get_trained_recognizer()
 
     except RuntimeError as error:
-
         return jsonify(
             error=str(error)
         ), 503
 
-    return jsonify(
-        ready=True
-    )
+    except Exception as error:
+        app.logger.exception("Failed to load trained model")
+        return jsonify(
+            error="Unable to load trained model. Please try training again."
+        ), 500
+
+    return jsonify(ready=True)
 
 
 # ============================================================
