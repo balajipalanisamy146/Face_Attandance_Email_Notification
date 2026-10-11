@@ -910,9 +910,13 @@ def train_lbph():
                 image_paths = list_cloud_face_images(student_id)
 
                 for image_path in image_paths:
+                    print(f"Downloading training image: {image_path}", flush=True)
+
                     image_bytes = supabase_storage.storage.from_(
-                        FACE_BUCKET
+                         FACE_BUCKET
                     ).download(image_path)
+
+                    print(f"Downloaded successfully: {image_path}", flush=True)
 
                     img = cv2.imdecode(
                         np.frombuffer(image_bytes, dtype=np.uint8),
